@@ -4,11 +4,13 @@ outputDir = "outputs"
 
 [importICS]
 # dateFrom/dateTo used for selecting events (YYYY-MM-DD)
+# TODO: log the excluded to importFailed.csv?
 dateFrom = "2026-01-01"
 dateTo   = "2026-12-31"
 
 # country filtering: only keep events whose LOCATION geocodes into one of these countries
-countries = ["DE","AT","CZ","HU","PL","NL","SI","RO","CH","HR","GR"]
+# TODO: log the excluded to importFailed.csv? What's with the UK?
+countries = ["DE","AT","CZ","HU","PL","NL","SI","RO","CH","HR","GR","UK"]
 
 # if you want to require LOCATION not empty
 requireLocation = true
