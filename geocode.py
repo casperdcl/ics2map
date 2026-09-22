@@ -1,5 +1,6 @@
 import csv
 import os
+import re
 import time
 from typing import List, Dict, Optional, Tuple
 
@@ -19,6 +20,21 @@ def _safe_get_country_code(geocode_raw: dict) -> str:
     # Sometimes 'country_code' exists; sometimes only 'country' exists.
     cc = (addr.get("country_code") or "").strip().upper()
     return cc
+
+
+# URL - not geocodable address (don't waste a rate-limited call)
+_ONLINE_RE = re.compile(r"^\s*(?:[a-z][a-z0-9+.-]*://|www\.)", re.I)
+# UK postcode fallback
+_UK_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b", re.I)
+_COUNTRY_ALIASES = {"UK": "GB", "GB": "UK"}
+
+
+def _country_allowed(cc: str, allowed_set: set) -> bool:
+    """default: allow"""
+    if not cc or not allowed_set:
+        return True
+    cc = cc.upper()
+    return cc in allowed_set or _COUNTRY_ALIASES.get(cc) in allowed_set
 
 
 def geocode_events(
@@ -82,25 +98,40 @@ def geocode_events(
                 loc_to_success[loc_text] = cached
                 continue
 
+        if _ONLINE_RE.match(loc_text):
+            loc_to_error[loc_text] = "url_not_a_location (online event)"
+            agg.totalGeocodeFailed += 1
+            logger.warn(f"Geocode SKIP location='{loc_text}' reason=online_event_url")
+            continue
+
+        # query as-is; fallback to postcode
+        candidates = [loc_text]
+        m = _UK_POSTCODE_RE.search(loc_text)
+        if m:
+            pc = re.sub(r"\s+", " ", m.group(1))
+            if pc.upper() != loc_text.strip().upper():
+                candidates.append(pc)
+
         # Geocode with throttling
-        try:
-            r = geolocator.geocode(loc_text, timeout=20, language=geocoder_language)
-            time.sleep(rate_limit_seconds)
+        last_error = "not_found"
+        for query in candidates:
+            try:
+                r = geolocator.geocode(query, timeout=20, language=geocoder_language)
+                time.sleep(rate_limit_seconds)
+            except Exception as ex:
+                last_error = f"exception:{type(ex).__name__}"
+                logger.error(f"Geocode EX location='{loc_text}' query='{query}' exception={last_error}")
+                continue
 
             if not r:
-                loc_to_error[loc_text] = "not_found"
-                agg.totalGeocodeFailed += 1
-                logger.warn(f"Geocode FAIL location='{loc_text}' reason=not_found")
                 continue
 
             raw = (r.raw or {})
             cc = _safe_get_country_code(raw)
 
             # Country filtering
-            if allowed_set and cc and cc not in allowed_set:
-                loc_to_error[loc_text] = f"outside_allowed_countries (cc={cc})"
-                agg.totalGeocodeFailed += 1
-                logger.warn(f"Geocode FAIL location='{loc_text}' reason=outside_allowed_countries cc={cc}")
+            if not _country_allowed(cc, allowed_set):
+                last_error = f"outside_allowed_countries (cc={cc})"
                 continue
 
             result = GeocodeResult(
@@ -116,15 +147,13 @@ def geocode_events(
 
             agg.totalGeocodeSucceeded += 1
             logger.info(
-                f"Geocode OK location='{loc_text}' -> ({result.lat},{result.lon}) cc={result.country_code}"
+                f"Geocode OK location='{loc_text}' (via '{query}') -> ({result.lat},{result.lon}) cc={result.country_code}"
             )
-
-        except Exception as ex:
-            # IMPORTANT: record exception name for debugging.
-            err_name = type(ex).__name__
-            loc_to_error[loc_text] = f"exception:{err_name}"
+            break
+        else:
+            loc_to_error[loc_text] = last_error
             agg.totalGeocodeFailed += 1
-            logger.error(f"Geocode EX location='{loc_text}' exception={err_name}")
+            logger.warn(f"Geocode FAIL location='{loc_text}' reason={last_error}")
 
     # Build map rows per event
     map_rows: List[dict] = []
