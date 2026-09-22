@@ -19,6 +19,10 @@ body { margin: 0; }
 /* Keep inputs readable */
 #controls input { width: 160px; }
 #controls label { margin-right: 8px; }
+#controls .dates-col label {
+  display: inline-block;
+  width: 3.5em;
+}
 
 /* Flex layout for the new structure */
 #controls .controls-row {
@@ -30,16 +34,11 @@ body { margin: 0; }
 #controls .dates-col {
   display: flex;
   flex-direction: column;
-  flex: 1;
 }
 
-#controls .showall-col {
-  display: flex;
-  align-items: stretch;
-}
-
-#controls .showall-col button {
-  align-self: stretch; /* makes Show All as tall as date-fields column */
+#controls #applyBtn {
+  align-self: stretch;
+  height: auto;
 }
 
 #controls .actions-row {
@@ -50,11 +49,13 @@ body { margin: 0; }
 }
 
 #controls button {
-  margin-top: 0; /* avoid fighting with the old global rule */
+  height: 28px;   /* small shared height (the stretched Apply overrides this) */
+  padding: 0 10px;
 }
 
-/* status takes remaining space next to Apply */
+/* status below the three buttons */
 #controls #status {
   color: #444;
-  flex: 1;
+  margin-top: 6px;
+  min-height: 1em;
 }

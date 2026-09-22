@@ -63,14 +63,13 @@ def build_controls_block(enabled: bool) -> str:
         <label>To</label><input id="toStartdate" type="date" />
       </div>
     </div>
-    <div class="showall-col">
-      <button id="showAllBtn" type="button">Show All</button>
-    </div>
+    <button id="applyBtn" type="button">Apply</button>
   </div>
   <div class="actions-row">
-    <button id="applyBtn" type="button">Apply</button>
-    <div id="status"></div>
+    <button id="showAllBtn" type="button">Show All</button>
+    <button id="showMonthBtn" type="button">Show 1 month</button>
   </div>
+  <div id="status"></div>
 </div>
 """
 
@@ -93,6 +92,22 @@ if (applyBtn) {
     const fromVal = document.getElementById('fromStartdate').value;
     const toVal = document.getElementById('toStartdate').value;
     renderFiltered(fromVal, toVal);
+  });
+}
+
+const showMonthBtn = document.getElementById("showMonthBtn");
+if (showMonthBtn) {
+  showMonthBtn.addEventListener("click", () => {
+    const fromD = new Date();
+    const toD = new Date();
+    toD.setMonth(toD.getMonth() + 1);
+    const fromStr = ymdFromLocalDate(fromD);
+    const toStr = ymdFromLocalDate(toD);
+    const fromEl = document.getElementById("fromStartdate");
+    const toEl = document.getElementById("toStartdate");
+    if (fromEl) fromEl.value = fromStr;
+    if (toEl) toEl.value = toStr;
+    renderFiltered(fromStr, toStr);
   });
 }
 
