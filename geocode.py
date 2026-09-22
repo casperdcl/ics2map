@@ -4,6 +4,8 @@ import re
 import time
 from typing import List, Dict, Optional, Tuple
 
+from datetime import datetime, timezone
+
 from geopy.geocoders import Nominatim
 
 from geocodeCache import GeocodeCache, GeocodeResult
@@ -37,6 +39,44 @@ def _country_allowed(cc: str, allowed_set: set) -> bool:
     return cc in allowed_set or _COUNTRY_ALIASES.get(cc) in allowed_set
 
 
+def _norm_loc(s: str) -> str:
+    return " ".join((s or "").split())
+
+
+def _load_fail_cache(path: str) -> Dict[str, dict]:
+    """negative-result cache (dodgy room names, out-of-country, etc.)"""
+    db: Dict[str, dict] = {}
+    if not os.path.exists(path):
+        return db
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            key = _norm_loc(row.get("location_text", ""))
+            if key:
+                db[key] = {"reason": row.get("reason", ""),
+                           "failed_at": row.get("failed_at", ""),
+                           "hits": int(row.get("hits") or 0)}
+    return db
+
+
+def _save_fail_cache(path: str, db: Dict[str, dict]) -> None:
+    """see _load_fail_cache"""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["location_text", "reason", "failed_at", "hits"],
+                           quotechar='"', quoting=csv.QUOTE_ALL)
+        w.writeheader()
+        for loc, e in sorted(db.items()):
+            w.writerow({"location_text": loc, **e})
+
+
+def _fail_fresh(entry: dict, ttl_hours: float) -> bool:
+    try:
+        then = datetime.fromisoformat(entry["failed_at"])
+    except (KeyError, ValueError, TypeError):
+        return False
+    return (datetime.now(timezone.utc) - then).total_seconds() < ttl_hours * 3600
+
+
 def geocode_events(
     events: List[IcsEvent],
     allowed_country_codes: List[str],
@@ -46,12 +86,14 @@ def geocode_events(
     failed_csv_path: str,
     logger: Logger,
     agg: LogAgg,
-    dedupe_by_location_text: bool = True
+    dedupe_by_location_text: bool = True,
+    fail_cache_path: Optional[str] = None,
+    fail_cache_ttl_hours: float = 720.0
 ) -> Tuple[List[dict], List[dict]]:
     """
     Main geocoding loop:
     - geocode only unique LOCATION strings (if dedupe_by_location_text=True)
-    - reuse cached successful results
+    - reuse cached successful results; skip recently-failed ones (if fail_cache_path)
     - write per-event failures to geocodeFailed.csv (human readable)
     - return map rows (per event, not per location)
 
@@ -75,6 +117,9 @@ def geocode_events(
 
     # NOTE: user-agent can be overridden in a follow-up step.
     allowed_set = set([c.upper() for c in allowed_country_codes])
+
+    fail_db: Dict[str, dict] = _load_fail_cache(fail_cache_path) if fail_cache_path else {}
+    fail_dirty = False
 
     # Per LOCATION cache
     loc_to_success: Dict[str, GeocodeResult] = {}
@@ -102,6 +147,15 @@ def geocode_events(
             loc_to_error[loc_text] = "url_not_a_location (online event)"
             agg.totalGeocodeFailed += 1
             logger.warn(f"Geocode SKIP location='{loc_text}' reason=online_event_url")
+            continue
+
+        # recently-failed location: skip without burning a rate-limited call
+        if fail_db and (f := fail_db.get(_norm_loc(loc_text))) and _fail_fresh(f, fail_cache_ttl_hours):
+            f["hits"] += 1
+            fail_dirty = True
+            loc_to_error[loc_text] = f"failed-in-past-run ({f['reason']})"
+            agg.totalGeocodeFailed += 1
+            logger.warn(f"Geocode SKIP location='{loc_text}' reason=fail_cache:{f['reason']}")
             continue
 
         # query as-is; fallback to postcode
@@ -144,6 +198,8 @@ def geocode_events(
             loc_to_success[loc_text] = result
             if geocode_cache:
                 geocode_cache.set(loc_text, result)
+            if fail_db.pop(_norm_loc(loc_text), None) is not None:  # resolves now → un-cache the failure
+                fail_dirty = True
 
             agg.totalGeocodeSucceeded += 1
             logger.info(
@@ -154,6 +210,12 @@ def geocode_events(
             loc_to_error[loc_text] = last_error
             agg.totalGeocodeFailed += 1
             logger.warn(f"Geocode FAIL location='{loc_text}' reason={last_error}")
+            if fail_cache_path:
+                prior = fail_db.get(_norm_loc(loc_text), {}).get("hits", 0)
+                fail_db[_norm_loc(loc_text)] = {"reason": last_error,
+                                                "failed_at": datetime.now(timezone.utc).isoformat(),
+                                                "hits": prior}
+                fail_dirty = True
 
     # Build map rows per event
     map_rows: List[dict] = []
@@ -210,5 +272,8 @@ def geocode_events(
         )
         for row in failed_rows:
             writer.writerow(row)
+
+    if fail_cache_path and fail_dirty:
+        _save_fail_cache(fail_cache_path, fail_db)
 
     return map_rows, failed_rows

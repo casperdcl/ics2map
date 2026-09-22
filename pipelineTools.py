@@ -105,6 +105,9 @@ def run_geocoding_and_write_map_data(cfg, events, agg, logger, output_dir):
 
     dedupe = bool(geo_cfg.get("dedupeByLocationText", True))
 
+    fail_cache_csv = geo_cfg.get("failCacheCsv", "geocodeFailCache.csv")
+    fail_cache_ttl_hours = float(geo_cfg.get("failCacheTtlHours", 720))
+
     # Marked: external web access. Keep this try/except for better logs later.
     try:
         map_rows, _ = geocode_events(
@@ -117,6 +120,8 @@ def run_geocoding_and_write_map_data(cfg, events, agg, logger, output_dir):
             logger=logger,
             agg=agg,
             dedupe_by_location_text=dedupe,
+            fail_cache_path=os.path.join(output_dir, fail_cache_csv),
+            fail_cache_ttl_hours=fail_cache_ttl_hours,
         )
     except Exception as e:
         logger.error(f"geocode_events failed: {type(e).__name__}: {e}")

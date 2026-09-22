@@ -30,6 +30,10 @@ geocodeCacheCsv = "geocodeCache.csv"
 geocodeFailedCsv = "geocodeFailed.csv"
 mapDataCsv = "mapData.csv"
 
+# negative-result cache (dodgy room names, out-of-country, etc.)
+failCacheCsv = "geocodeFailCache.csv"
+failCacheTtlHours = 720  # 30 days
+
 # control de-duplication: if multiple events share the same LOCATION text,
 # we geocode once and reuse for all those events
 dedupeByLocationText = true
