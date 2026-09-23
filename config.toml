@@ -18,6 +18,10 @@ requireLocation = true
 # do not skip silently where import fails
 importFailedCsv = "importFailed.csv"
 
+# regex replacement table applied to LOCATION before geocoding
+[importICS.locationReplacements]
+# "^SAF( | rm .*| room .*)?$" = 'Sir Alexander Fleming building\1, Imperial, London SW7 2AZ'
+
 [geoCode]
 rateLimitSeconds = 1.1
 geocoderLanguage = "en"

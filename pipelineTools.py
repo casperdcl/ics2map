@@ -1,6 +1,7 @@
 import os
 import csv
 import json
+import re
 import tomllib  # Python 3.11+
 
 from importICS import load_events_from_ics
@@ -11,6 +12,33 @@ from htmlTools import (
     write_map_html,
     copy_map_assets_to_output_dir,
 )
+
+
+def compile_location_replacements(cfg, logger):
+    """
+    Compile [importICS.locationReplacements] into a list of (regex, replacement) rules.
+    Invalid patterns are logged and skipped; rules keep config order.
+    """
+    rules = []
+    for pattern, replacement in cfg.get("importICS", {}).get("locationReplacements", {}).items():
+        try:
+            rules.append((re.compile(pattern), replacement))
+        except re.error as e:
+            logger.warn(f"Location replacement skipped pattern={pattern!r} error={e}")
+    return rules
+
+
+def apply_location_replacements(events, rules, logger):
+    """
+    Rewrite ev.location_text in place; first rule matching wins.
+    """
+    for ev in events:
+        for regex, replacement in rules:
+            new, n = regex.subn(replacement, ev.location_text, count=1)
+            if n:
+                logger.info(f"Location replaced '{ev.location_text}' -> '{new}' (pattern {regex.pattern!r})")
+                ev.location_text = new
+                break
 
 
 def load_config_and_init_logging(logger_output_dir: str):
@@ -76,6 +104,11 @@ def load_selected_ics_events(cfg, output_dir, agg, logger):
         logger=logger,
         agg=agg,
     )
+
+    rules = compile_location_replacements(cfg, logger)
+    if rules:
+        apply_location_replacements(events, rules, logger)
+
     agg.totalSelectedEvents = len(events)
 
     logger.info(
